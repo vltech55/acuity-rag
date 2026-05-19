@@ -1,159 +1,119 @@
-# Production RAG: Hybrid Search + Evals
+<div align="center">
 
-End-to-end Retrieval-Augmented Generation over a corpus of arXiv ML/AI papers.
-Hybrid retrieval (BM25 + pgvector) fused via Reciprocal Rank Fusion, cross-encoder
-reranking, citation-grounded streaming answers, a grounding judge that detects
-hallucinated claims, and an evaluation harness measuring precision@k, recall@k,
-MRR, and faithfulness.
+# Acuity — Production RAG with Hybrid Search + Evals
 
-> **Why this exists:** most RAG systems shipped to production cannot answer
-> *"is it actually working?"*. This one can — every change is measured against
-> a held-out test set, and every claim in every answer is scored for
-> faithfulness against its cited sources.
+**Hybrid BM25 + pgvector retrieval, citation-grounded answers, and a 48-question eval harness that gates every prompt change.**
 
----
+![Acuity feature poster](docs/screenshots/feature.png)
+
+[![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Postgres + pgvector](https://img.shields.io/badge/Postgres%2016-pgvector%20HNSW-336791?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
+[![Next.js 14](https://img.shields.io/badge/Next.js%2014-000000?logo=next.js)](https://nextjs.org/)
+[![Claude](https://img.shields.io/badge/Claude-sonnet--4--6-D97757)](https://www.anthropic.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
+## What it does
+
+Acuity is an end-to-end RAG over an arXiv corpus. It ingests papers, embeds them with OpenAI `text-embedding-3-small` into pgvector, indexes content into a Postgres `tsvector` for BM25, and serves answers through a streaming SSE chat endpoint that fuses both retrievers via **reciprocal rank fusion**, optionally reranks with a cross-encoder, and grounds **every claim** with `[Sₙ]` citation markers back to the source chunk.
+
+A separate `/eval` pipeline runs a fixed 48-question test set on a schedule, persists run history with **P@5, R@5, MRR, faithfulness + four RAGAS metrics**, and exposes a 28-day trend chart in the frontend dashboard. CI blocks merges if any metric regresses.
+
+## Features
+
+- **Hybrid retrieval** — Postgres `tsvector` (BM25 via GIN index) ∪ pgvector HNSW, fused with reciprocal rank fusion at *k* = 60.
+- **Confidence-gated reranking** — sentence-transformers `ms-marco-MiniLM-L-6-v2` reranks the top-15 candidates; skipped automatically when RRF score is already high.
+- **Streaming citation-grounded generation** — `sse-starlette` streams Claude's response with inline `[Sₙ]` markers; a post-hoc verifier discards completions whose claims lack a retrieved chunk.
+- **Per-claim faithfulness scoring** — entailment scored against the cited chunk; answers below 0.7 auto-retry once with widened *k* before failing.
+- **Persistent eval harness** — 48-question test set, 4 core + 4 RAGAS metrics, run history with git SHA + config snapshot; CI gate on regression.
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/chat.png"     alt="Streaming chat with inline [Sₙ] citations and per-claim grounding"></td>
+<td width="50%"><img src="docs/screenshots/eval.png"     alt="28-day eval timeline — P@5, R@5, MRR, faithfulness"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/landing.png"  alt="Lab landing — sample queries and ask box"></td>
+<td><img src="docs/screenshots/library.png"  alt="Indexed corpus library"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/history.png"  alt="Inquiry log — every past chat replayable"></td>
+<td><img src="docs/screenshots/settings.png" alt="Pipeline settings — chunking, retrieval, gen, eval"></td>
+</tr>
+</table>
+
+## Stack
+
+| Layer       | Tech |
+|-------------|------|
+| Backend     | Python 3.11, FastAPI, sse-starlette, SQLAlchemy 2 + asyncpg, Alembic, Pydantic 2 |
+| Storage     | Postgres 16, pgvector (HNSW), Postgres `tsvector` + GIN (BM25) |
+| Retrieval   | reciprocal rank fusion (k = 60), sentence-transformers cross-encoder |
+| Generation  | Anthropic Claude `sonnet-4-6`, OpenAI `text-embedding-3-small`, tiktoken |
+| Eval        | custom + RAGAS metrics, persisted to `eval_runs`, CI gate on regression |
+| Frontend    | Next.js 14, TypeScript, Tailwind, Recharts |
+| Ops         | Docker Compose, structlog, slowapi rate limiting |
+
+## Run locally
+
+```bash
+git clone https://github.com/phantomdev0826/acuity-rag
+cd acuity-rag
+cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY
+docker compose up -d --build
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m scripts.seed_fake      # 3 papers / 12 chunks via OpenAI embeddings
+docker compose exec backend python -m scripts.run_eval       # populate eval_runs
+```
+
+Open <http://localhost:3000> for the chat UI, <http://localhost:3000/eval> for the metrics dashboard, <http://localhost:8000/docs> for the OpenAPI explorer.
 
 ## Architecture
 
 ```
-arXiv corpus → pypdf → tiktoken chunker → OpenAI embeddings → Postgres (pgvector + tsvector)
-
-User query ──┬─→ BM25 (ts_rank_cd) ─┐
-             └─→ pgvector cosine ──┴─→ RRF (k=60) → cross-encoder rerank top-20
-                                                              │
-                                                              ▼
-                                              Claude (citation-enforced)
-                                                              │
-                                                  ┌───────────┴───────────┐
-                                                  ▼                       ▼
-                                          SSE token stream         LLM-as-judge
-                                                                   grounding score
+                    ┌──────────────┐
+  user query ──────▶│   /chat      │ ── stream ───────▶ frontend (SSE)
+                    └─────┬────────┘
+                          │
+                  ┌───────┴────────┐
+        ┌─────────▼──────┐  ┌──────▼─────────┐
+        │ BM25 (Postgres │  │ pgvector ANN   │
+        │ GIN/tsvector)  │  │ HNSW           │
+        └─────────┬──────┘  └──────┬─────────┘
+                  │                │
+                  └──── RRF k=60 ──┘
+                          │
+                ┌─────────▼──────────┐
+                │ cross-encoder      │
+                │ rerank (gated)     │
+                └─────────┬──────────┘
+                          │
+                ┌─────────▼──────────┐
+                │ Claude generation  │
+                │ + [Sₙ] markers     │
+                └─────────┬──────────┘
+                          │
+                ┌─────────▼──────────┐
+                │ per-claim          │
+                │ entailment verifier│   ──── grounded < 0.7 → retry
+                └─────────┬──────────┘
+                          │
+                          ▼
+                   final SSE event
 ```
 
-Full mermaid diagram: [`docs/architecture.md`](./docs/architecture.md).
-
-## Stack
-
-- **Backend:** Python 3.11, FastAPI (async), Pydantic v2, SQLAlchemy 2 async + asyncpg, Alembic, structlog
-- **DB:** PostgreSQL 16 with `pgvector` (HNSW index) and `tsvector` (GIN index)
-- **LLM:** Claude `claude-sonnet-4-6` for generation, judging, and test-set generation
-- **Embeddings:** OpenAI `text-embedding-3-small` (1536-dim)
-- **Reranker:** `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, CPU)
-- **Eval:** custom precision@k / recall@k / MRR + RAGAS (optional)
-- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind, Radix Popover
-- **Infra:** docker-compose (Postgres + backend + frontend), Makefile-driven workflow
-
-## Quick start
+## Tests
 
 ```bash
-# 1. configure
-cp .env.example .env
-# Edit .env to set ANTHROPIC_API_KEY and OPENAI_API_KEY
-
-# 2. boot
-make up
-make migrate
-
-# 3. populate
-make ingest            # fetch ~100 recent cs.AI / cs.CL / cs.LG papers
-make gen-test-set      # derive a 50-question eval set from the corpus
-
-# 4. open
-#   http://localhost:3000      chat UI
-#   http://localhost:3000/eval eval dashboard
-#   http://localhost:8000/docs OpenAPI
-
-# 5. measure
-make eval
+docker compose exec backend pytest
 ```
 
-## Endpoints
-
-| Method | Path                | Purpose                                      |
-| ------ | ------------------- | -------------------------------------------- |
-| GET    | `/health`           | Liveness                                     |
-| GET    | `/ready`            | Readiness (db + provider keys)               |
-| POST   | `/search`           | Hybrid retrieval only (no generation)        |
-| POST   | `/chat`             | Streaming SSE: sources → tokens → grounding  |
-| GET    | `/eval/runs`        | Historical eval runs                         |
-| GET    | `/eval/runs/latest` | Most recent eval run                         |
-
-`POST /chat` SSE event sequence: `sources` → `token` (many) → `citations`
-→ `grounding` → `done`. The frontend uses this to render the source list,
-stream the answer, then attach popovers to citation markers and show a
-faithfulness meter.
-
-## Key design choices
-
-| Decision                              | Rationale                                                            |
-| ------------------------------------- | -------------------------------------------------------------------- |
-| Hybrid retrieval over single ranker   | BM25 wins rare terms, semantic wins paraphrase; RRF fuses without scale calibration |
-| RRF with k=60                         | Original Cormack et al. value; flattens single-ranker dominance      |
-| Generated column for `content_tsv`    | Postgres keeps the BM25 vector in sync; no risk of stale state       |
-| HNSW over IVFFlat                     | Better recall at low query latency for our corpus size               |
-| Inline citation markers, not JSON     | Streamable; markers validated post-stream against retrieved set      |
-| Separate grounding judge              | The author model is a poor judge of itself; a second pass scores faithfulness |
-| Test set derived from ingested corpus | Avoids contamination — questions written *against papers we indexed* |
-| Idempotent ingestion by arXiv ID      | Re-running `make ingest` is safe; never double-embeds                |
-| Each eval run records git SHA         | Regressions are attributable to a specific commit                    |
-
-## Project layout
-
-```
-01-production-rag/
-├── backend/
-│   ├── src/rag/
-│   │   ├── core/           config, logging, llm clients
-│   │   ├── ingestion/      arxiv fetch, chunking, embed, pipeline
-│   │   ├── retrieval/      bm25, semantic, RRF, rerank, hybrid
-│   │   ├── generation/     prompts, citations, guardrails, streaming answer
-│   │   ├── eval/           metrics, test set, faithfulness, RAGAS, runner
-│   │   ├── api/            health, search, chat, eval routes
-│   │   ├── models.py       SQLAlchemy: papers, chunks, eval_runs
-│   │   ├── schemas.py      Pydantic request/response models
-│   │   └── main.py         FastAPI app with request-id middleware
-│   ├── alembic/            migrations (pgvector extension + HNSW + GIN)
-│   ├── scripts/            seed_corpus, generate_test_set, run_eval
-│   └── tests/              chunking, RRF, citations, metrics
-├── frontend/
-│   ├── app/                /, /eval (Next.js App Router)
-│   ├── components/         chat, answer-text, citation-marker, grounding-meter, eval-dashboard, sources-list
-│   └── lib/                api client, utils
-├── eval/
-│   ├── test_questions.jsonl
-│   └── results/            eval-<timestamp>.json + latest.json
-├── docs/
-│   ├── architecture.md     mermaid diagram + design rationale
-│   └── eval-results.md     methodology
-├── docker-compose.yml
-├── Makefile
-└── .env.example
-```
-
-## Make targets
-
-```
-make up             start postgres + backend + frontend
-make migrate        apply alembic migrations
-make ingest         fetch arXiv corpus + chunk + embed (idempotent)
-make gen-test-set   derive eval test set from ingested corpus
-make eval           run eval harness; write eval/results/eval-*.json
-make test           pytest (chunking, RRF, citations, metrics)
-make lint           ruff check + mypy strict
-make psql           open psql shell against running db
-make down           stop containers
-make clean          stop + drop volumes (destructive)
-```
-
-## What this isn't (yet)
-
-- Multi-tenant isolation (Project 5 covers that)
-- Live LLM cost dashboards (Project 6 covers that)
-- Human review queue for low-faithfulness answers (Project 4 covers that)
-
-This repo is the *retrieval + measurement* foundation that the other projects
-in the portfolio build on.
+Unit tests for the RRF combiner, the BM25/pgvector adapters, the citation extractor, and the entailment verifier.
 
 ## License
 
-MIT.
+MIT
