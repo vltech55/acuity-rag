@@ -2,35 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
+/* "Research Lab" — Anthropic Console feel: warm dark, serif headings, sienna accents */
 :root {
   color-scheme: dark;
+  --bg: #1a1410;
+  --surface: #221b16;
+  --surface-2: #2a221c;
+  --paper: #f5efe6;
+  --paper-ink: #2d241d;
+  --border: rgba(245, 222, 179, 0.07);
+  --border-strong: rgba(245, 222, 179, 0.14);
+  --text: #f0e6d6;
+  --muted: #c2a78a;
+  --subtle: #8a7560;
+  --accent: #c97a4e;        /* sienna */
+  --accent-hover: #db8b5f;
+  --accent-soft: rgba(201, 122, 78, 0.16);
+  --emerald: #67c39a;
 }
 
 html, body {
   height: 100%;
-  background: #0a0a0b;
-  color: #ededed;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 40% at 50% -10%, rgba(201, 122, 78, 0.15), transparent),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(102, 64, 36, 0.12), transparent);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.008em;
 }
 
+.font-serif {
+  font-family: 'Charter', 'Georgia', 'Iowan Old Style', 'Palatino', ui-serif, serif;
+  letter-spacing: -0.012em;
+}
+
+* { border-color: var(--border); }
+::selection { background: rgba(201, 122, 78, 0.4); color: #fff5e6; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(245,222,179,0.07); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(245,222,179,0.14); }
+
+/* Citation markers — superscript footnote style */
 .citation-marker {
-  display: inline-block;
-  min-width: 1.4rem;
-  padding: 0 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  height: 1rem;
+  min-width: 1rem;
+  padding: 0 0.3rem;
   border-radius: 0.25rem;
-  font-size: 0.7rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  background: rgba(56, 189, 248, 0.18);
-  color: #38bdf8;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
   cursor: pointer;
-  margin: 0 0.1rem;
-  vertical-align: super;
-  line-height: 1.4;
+  margin: 0 0.12rem;
+  vertical-align: 2px;
+  line-height: 1;
   transition: background 120ms;
+  font-family: 'Inter', sans-serif;
 }
-.citation-marker:hover { background: rgba(56, 189, 248, 0.32); }
+.citation-marker:hover { background: rgba(201, 122, 78, 0.32); }
 
-.grounding-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(to right, #ef4444, #facc15, #4ade80);
+/* paper-like cards */
+.paper-edge {
+  border-image: linear-gradient(180deg, rgba(245,222,179,0.18), rgba(245,222,179,0.04)) 1;
 }
