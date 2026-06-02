@@ -61,7 +61,7 @@ A separate `/eval` pipeline runs a fixed 48-question test set on a schedule, per
 ## Run locally
 
 ```bash
-git clone https://github.com/phantomdev0826/acuity-rag
+git clone https://github.com/vltech55/acuity-rag
 cd acuity-rag
 cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY
 docker compose up -d --build
