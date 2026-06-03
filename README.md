@@ -2,7 +2,7 @@
 
 # Acuity — Production RAG with Hybrid Search + Evals
 
-**Hybrid BM25 + pgvector retrieval, citation-grounded answers, and a 48-question eval harness that gates every prompt change.**
+**Hybrid BM25 + pgvector retrieval with reciprocal rank fusion, cross-encoder rerank, citation-grounded streaming answers, and a faithfulness eval harness with per-run history.**
 
 ![Acuity feature poster](docs/screenshots/feature.png)
 
@@ -19,7 +19,7 @@
 
 Acuity is an end-to-end RAG over an arXiv corpus. It ingests papers, embeds them with OpenAI `text-embedding-3-small` into pgvector, indexes content into a Postgres `tsvector` for BM25, and serves answers through a streaming SSE chat endpoint that fuses both retrievers via **reciprocal rank fusion**, optionally reranks with a cross-encoder, and grounds **every claim** with `[Sₙ]` citation markers back to the source chunk.
 
-A separate `/eval` pipeline runs a fixed 48-question test set on a schedule, persists run history with **P@5, R@5, MRR, faithfulness + four RAGAS metrics**, and exposes a 28-day trend chart in the frontend dashboard. CI blocks merges if any metric regresses.
+A separate `/eval` pipeline runs a labeled test set on demand, persists run history with **P@5, R@5, MRR, faithfulness, and optional RAGAS metrics (context precision/recall, answer relevancy, faithfulness)**, and exposes the trend in the frontend dashboard. Every run is stored with its git SHA so before/after comparisons after a change are direct.
 
 ## Features
 
@@ -27,7 +27,7 @@ A separate `/eval` pipeline runs a fixed 48-question test set on a schedule, per
 - **Confidence-gated reranking** — sentence-transformers `ms-marco-MiniLM-L-6-v2` reranks the top-15 candidates; skipped automatically when RRF score is already high.
 - **Streaming citation-grounded generation** — `sse-starlette` streams Claude's response with inline `[Sₙ]` markers; a post-hoc verifier discards completions whose claims lack a retrieved chunk.
 - **Per-claim faithfulness scoring** — entailment scored against the cited chunk; answers below 0.7 auto-retry once with widened *k* before failing.
-- **Persistent eval harness** — 48-question test set, 4 core + 4 RAGAS metrics, run history with git SHA + config snapshot; CI gate on regression.
+- **Persistent eval harness** — labeled test set, 4 core + 4 RAGAS metrics, run history with git SHA + config snapshot so regressions are trackable across commits.
 
 ## Screenshots
 
@@ -54,7 +54,7 @@ A separate `/eval` pipeline runs a fixed 48-question test set on a schedule, per
 | Storage     | Postgres 16, pgvector (HNSW), Postgres `tsvector` + GIN (BM25) |
 | Retrieval   | reciprocal rank fusion (k = 60), sentence-transformers cross-encoder |
 | Generation  | Anthropic Claude `sonnet-4-6`, OpenAI `text-embedding-3-small`, tiktoken |
-| Eval        | custom + RAGAS metrics, persisted to `eval_runs`, CI gate on regression |
+| Eval        | custom + RAGAS metrics, persisted to `eval_runs` with per-run git SHA |
 | Frontend    | Next.js 14, TypeScript, Tailwind, Recharts |
 | Ops         | Docker Compose, structlog, slowapi rate limiting |
 
