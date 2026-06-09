@@ -1,8 +1,8 @@
 <div align="center">
 
-# Acuity — Production RAG with Hybrid Search + Evals
+# Acuity
 
-**Hybrid BM25 + pgvector retrieval with reciprocal rank fusion, cross-encoder rerank, citation-grounded streaming answers, and a faithfulness eval harness with per-run history.**
+**Production-grade RAG with hybrid BM25 + pgvector retrieval, reciprocal rank fusion, cross-encoder reranking, citation-grounded streaming, and a faithfulness eval harness with per-run history.**
 
 ![Acuity feature poster](docs/screenshots/feature.png)
 
@@ -15,11 +15,25 @@
 
 </div>
 
-## What it does
+---
 
-Acuity is an end-to-end RAG over an arXiv corpus. It ingests papers, embeds them with OpenAI `text-embedding-3-small` into pgvector, indexes content into a Postgres `tsvector` for BM25, and serves answers through a streaming SSE chat endpoint that fuses both retrievers via **reciprocal rank fusion**, optionally reranks with a cross-encoder, and grounds **every claim** with `[Sₙ]` citation markers back to the source chunk.
+## Table of Contents
 
-A separate `/eval` pipeline runs a labeled test set on demand, persists run history with **P@5, R@5, MRR, faithfulness, and optional RAGAS metrics (context precision/recall, answer relevancy, faithfulness)**, and exposes the trend in the frontend dashboard. Every run is stored with its git SHA so before/after comparisons after a change are direct.
+- [Overview](#overview)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Tech Stack](#tech-stack)
+- [Installation](#installation)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Author](#author)
+- [License](#license)
+
+## Overview
+
+Acuity is an end-to-end retrieval-augmented generation system over an arXiv corpus. It ingests papers, embeds them with OpenAI `text-embedding-3-small` into pgvector, indexes content into a Postgres `tsvector` for BM25, and serves answers through a streaming SSE chat endpoint that fuses both retrievers via reciprocal rank fusion, optionally reranks with a cross-encoder, and grounds every claim with `[Sₙ]` citation markers back to the source chunk.
+
+A separate `/eval` pipeline runs a labeled test set on demand, persists run history with P@5, R@5, MRR, faithfulness, and optional RAGAS metrics (context precision/recall, answer relevancy, faithfulness), and exposes the trend in the frontend dashboard. Every run is stored with its git SHA so before/after comparisons after a change are direct.
 
 ## Features
 
@@ -46,22 +60,22 @@ A separate `/eval` pipeline runs a labeled test set on demand, persists run hist
 </tr>
 </table>
 
-## Stack
+## Tech Stack
 
-| Layer       | Tech |
-|-------------|------|
+| Layer       | Technology |
+|-------------|------------|
 | Backend     | Python 3.11, FastAPI, sse-starlette, SQLAlchemy 2 + asyncpg, Alembic, Pydantic 2 |
 | Storage     | Postgres 16, pgvector (HNSW), Postgres `tsvector` + GIN (BM25) |
-| Retrieval   | reciprocal rank fusion (k = 60), sentence-transformers cross-encoder |
+| Retrieval   | Reciprocal rank fusion (k = 60), sentence-transformers cross-encoder |
 | Generation  | Anthropic Claude `sonnet-4-6`, OpenAI `text-embedding-3-small`, tiktoken |
-| Eval        | custom + RAGAS metrics, persisted to `eval_runs` with per-run git SHA |
+| Evaluation  | Custom + RAGAS metrics, persisted to `eval_runs` with per-run git SHA |
 | Frontend    | Next.js 14, TypeScript, Tailwind, Recharts |
-| Ops         | Docker Compose, structlog, slowapi rate limiting |
+| Operations  | Docker Compose, structlog, slowapi rate limiting |
 
-## Run locally
+## Installation
 
 ```bash
-git clone https://github.com/vltech55/acuity-rag
+git clone https://github.com/vltech55/acuity-rag.git
 cd acuity-rag
 cp .env.example .env       # add OPENAI_API_KEY + ANTHROPIC_API_KEY
 docker compose up -d --build
@@ -106,14 +120,20 @@ Open <http://localhost:3000> for the chat UI, <http://localhost:3000/eval> for t
                    final SSE event
 ```
 
-## Tests
+## Testing
 
 ```bash
 docker compose exec backend pytest
 ```
 
-Unit tests for the RRF combiner, the BM25/pgvector adapters, the citation extractor, and the entailment verifier.
+Unit tests cover the RRF combiner, the BM25/pgvector adapters, the citation extractor, and the entailment verifier.
+
+## Author
+
+**Vlad L.** — independent senior engineer specializing in production-grade LLM systems (RAG, agents, gateways, multi-tenant SaaS).
+
+[![GitHub](https://img.shields.io/badge/GitHub-vltech55-181717?logo=github)](https://github.com/vltech55)
 
 ## License
 
-MIT
+[MIT](LICENSE) © Vlad L.
